@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>SAGE GAME — TAP Cartridge</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;background:#111;color:#eee;font-family:system-ui,-apple-system,sans-serif}
+body{display:flex;justify-content:center;min-height:100vh;padding:14px}
+#tap{
+  width:min(430px,100%);
+  min-height:720px;
+  background:#242424;
+  border:5px solid #444;
+  border-radius:28px;
+  padding:14px;
+  box-shadow:0 12px 35px #000;
+}
+#speaker{height:8px;width:90px;background:#111;border-radius:8px;margin:2px auto 12px}
+#screen{
+  background:#d8dfc2;
+  color:#182018;
+  border:8px solid #111;
+  border-radius:8px;
+  min-height:485px;
+  padding:14px;
+  font-family:"Courier New",monospace;
+  font-weight:bold;
+  overflow:hidden;
+}
+h1{font-size:23px;margin:0 0 8px}
+h2{font-size:17px;margin:0 0 10px}
+p{font-size:14px;line-height:1.45;margin:7px 0}
+.small{font-size:11px;opacity:.8}
+.choice{
+  border:2px solid #263026;
+  padding:8px;
+  margin:7px 0;
+  min-height:42px;
+}
+.choice b{display:inline-block;width:24px}
+.highlight{background:#263026;color:#d8dfc2}
+.bar{height:10px;background:#7e866f;margin:6px 0}
+.fill{height:100%;background:#182018}
+.good{border-left:5px solid #263026;padding-left:8px}
+.warn{border-left:5px solid #555;padding-left:8px}
+#buttons{
+  display:grid;
+  grid-template-columns:repeat(5,1fr);
+  gap:8px;
+  margin-top:13px;
+}
+button{
+  border:0;
+  border-radius:50%;
+  aspect-ratio:1;
+  background:#ddd;
+  color:#111;
+  font-weight:900;
+  font-size:12px;
+  box-shadow:0 4px 0 #777;
+  touch-action:manipulation;
+}
+button:active{transform:translateY(3px);box-shadow:0 1px 0 #777}
+#status{text-align:center;font-size:10px;color:#aaa;margin-top:9px}
+hr{border:0;border-top:1px solid #687060;margin:12px 0}
+</style>
+</head>
+<body>
+
+<div id="tap">
+  <div id="speaker"></div>
+  <div id="screen"></div>
+  <div id="buttons"></div>
+  <div id="status">SAGE GAME • TAP CARTRIDGE</div>
+</div>
+
+<script>
+/* =========================================================
+   SAGE GAME — TAP CARTRIDGE V1
+   Standalone browser prototype.
+
+   TAP cartridge concept:
+   - 5 physical buttons
+   - contextual remapping
+   - persistent save
+   - no sensors
+   - consequence-based decision training
+   ========================================================= */
+
+const screen=document.getElementById("screen");
+const buttonsEl=document.getElementById("buttons");
+const statusEl=document.getElementById("status");
+
+const SAVE_KEY="tap_sage_game_v1";
+
+let save=loadSave();
+
+let state={
+  scene:"TITLE",
+  choices:[],
+  selected:0,
+  assumptions:[],
+  decision:null,
+  consequence:null,
+  reflection:null,
+  infoStep:0
+};
+
+function loadSave(){
+  try{
+    const x=JSON.parse(localStorage.getItem(SAVE_KEY)||"null");
+    return x||{
+      runs:0,
+      decisions:0,
+      replays:0,
+      patterns:{
+        action:0,
+        wait:0,
+        investigate:0,
+        force:0
+      },
+      profile:{
+        observation:0,
+        restraint:0,
+        adaptability:0,
+        consequence:0
+      },
+      history:[]
+    };
+  }catch(e){
+    return {
+      runs:0,decisions:0,replays:0,
+      patterns:{action:0,wait:0,investigate:0,force:0},
+      profile:{observation:0,restraint:0,adaptability:0,consequence:0},
+      history:[]
+    };
+  }
+}
+
+function saveGame(){
+  localStorage.setItem(SAVE_KEY,JSON.stringify(save));
+}
+
+function esc(x){
+  return String(x).replace(/[&<>"]/g,m=>({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"
+  }[m]));
+}
+
+function pct(n){
+  return Math.max(0,Math.min(100,Math.round(n)));
+}
+
+function render(title,body){
+  screen.innerHTML=
+    `<h1>${title}</h1>${body}`;
+}
+
+function mapButtons(labels,handlers){
+  buttonsEl.innerHTML="";
+  for(let i=0;i<5;i++){
+    const b=document.createElement("button");
+    b.textContent=labels[i]||"—";
+    b.onclick=()=>handlers[i]&&handlers[i]();
+    buttonsEl.appendChild(b);
+  }
+}
+
+function keyControls(){
+  document.onkeydown=e=>{
+    if(e.key>="1"&&e.key<="5"){
+      const i=Number(e.key)-1;
+      buttonsEl.children[i]?.click();
+    }
+  };
+}
+
+function title(){
+  state.scene="TITLE";
+
+  render("SAGE GAME",`
+    <p><b>A SAFE PLACE TO PRACTICE JUDGMENT.</b></p>
+    <hr>
+    <p>You will enter a situation without knowing the whole story.</p>
+    <p>Your job is not to guess the game's "correct" answer.</p>
+    <p><b>Read the situation. Decide. Experience the consequence. Reconsider.</b></p>
+    <hr>
+    <p class="small">
+      Inspired by the practical-questioning spirit of Taoist teaching
+      stories, including the Lieh-tzu tradition.
+    </p>
+    <p class="small">CASE 001 • THE VILLAGE PROBLEM</p>
+  `);
+
+  mapButtons(
+    ["BEGIN","PROFILE","ABOUT","RESET",""],
+    [startCase,profile,about,resetGame,null]
+  );
+}
+
+function startCase(){
+  save.runs++;
+  state={
+    scene:"OBSERVE",
+    choices:[],
+    selected:0,
+    assumptions:[],
+    decision:null,
+    consequence:null,
+    reflection:null,
+    infoStep:0
+  };
+  saveGame();
+  observe();
+}
+
+function observe(){
+  state.scene="OBSERVE";
+
+  render("CASE 001",`
+    <p><b>THE VILLAGE PROBLEM</b></p>
+    <hr>
+    <p>A village has experienced a sudden increase in theft.</p>
+    <p>The village leader asks you for advice.</p>
+    <p>People are demanding immediate action.</p>
+    <p>You have limited information.</p>
+    <hr>
+    <p><b>What do you do first?</b></p>
+
+    <div class="choice"><b>1</b> Increase punishment.</div>
+    <div class="choice"><b>2</b> Increase patrols.</div>
+    <div class="choice"><b>3</b> Investigate why theft increased.</div>
+    <div class="choice"><b>4</b> Announce a strict new rule.</div>
+    <div class="choice"><b>5</b> Wait and observe.</div>
+  `);
+
+  mapButtons(
+    ["PUNISH","PATROL","INVESTIGATE","RULE","OBSERVE"],
+    [()=>choose("force"),()=>choose("action"),()=>choose("investigate"),
+     ()=>choose("force"),()=>choose("wait")]
+  );
+}
+
+function choose(type){
+  save.decisions++;
+  save.patterns[type]++;
+  state.decision=type;
+
+  if(type==="investigate"){
+    save.profile.observation+=2;
+    investigate();
+    return;
+  }
+
+  if(type==="wait"){
+    save.profile.restraint+=2;
+    waitConsequence();
+    return;
+  }
+
+  save.profile.consequence+=1;
+  actionConsequence(type);
+}
+
+function actionConsequence(type){
+  state.scene="CONSEQUENCE";
+
+  let text="";
+
+  if(type==="force"){
+    text=`
+      <p>The announcement produces an immediate feeling of control.</p>
+      <p>But something unexpected happens.</p>
+      <p>People become afraid of being suspected. Several villagers stop
+      reporting small incidents because they don't want attention.</p>
+      <p>The theft problem does not disappear.</p>
+    `;
+  }else{
+    text=`
+      <p>Patrols are increased.</p>
+      <p>For several days, reported theft falls.</p>
+      <p>But the village becomes tense. Guards are spending more time
+      watching people than understanding why the theft began.</p>
+      <p>The underlying cause remains unknown.</p>
+    `;
+  }
+
+  state.consequence=type;
+
+  render("CONSEQUENCE",`
+    ${text}
+    <hr>
+    <p><b>Something important is still missing.</b></p>
+    <p>Do you continue the same approach or investigate?</p>
+  `);
+
+  mapButtons(
+    ["CONTINUE","INVESTIGATE","RETHINK","WAIT","NEXT"],
+    [
+      ()=>continueAction(type),
+      investigate,
+      investigate,
+      waitConsequence,
+      investigate
+    ]
+  );
+}
+
+function continueAction(type){
+  save.profile.consequence+=1;
+
+  render("SECONDARY EFFECT",`
+    <p>You continue the intervention.</p>
+    <p>More resources are directed toward enforcement.</p>
+    <p>Now a new problem appears: the village has fewer resources
+    available for teaching young people the rules and resolving disputes.</p>
+    <hr>
+    <p><b>The original problem is becoming connected to a second one.</b></p>
+  `);
+
+  mapButtons(
+    ["STOP","INVESTIGATE","CONTINUE","REFLECT","NEXT"],
+    [
+      investigate,
+      investigate,
+      ()=>continueAction(type),
+      reflection,
+      investigate
+    ]
+  );
+}
+
+function waitConsequence(){
+  state.consequence="wait";
+
+  render("CONSEQUENCE",`
+    <p>You choose not to intervene immediately.</p>
+    <p>For a short time, nothing changes.</p>
+    <p>Then another theft occurs.</p>
+    <p>The villagers interpret your lack of action as indifference.</p>
+    <p>Pressure on the leader increases.</p>
+    <hr>
+    <p><b>Restraint avoided one kind of interference,
+    but created another problem.</b></p>
+    <p>The situation may require action — but you still don't know
+    what kind.</p>
+  `);
+
+  mapButtons(
+    ["ACT","INVESTIGATE","WAIT","REFLECT","NEXT"],
+    [
+      ()=>investigate(),
+      investigate,
+      waitConsequence,
+      reflection,
+      investigate
+    ]
+  );
+}
+
+function investigate(){
+  state.scene="INVESTIGATE";
+  state.infoStep=0;
+
+  render("INVESTIGATE",`
+    <p>You ask a simple question:</p>
+    <p><b>“Why did theft increase?”</b></p>
+    <hr>
+    <p>You discover that several recent families are unfamiliar
+    with the village's rules about ownership and shared resources.</p>
+    <p>Some conflicts that were previously settled informally
+    are now becoming disputes.</p>
+    <hr>
+    <p>But you still don't know whether lack of knowledge is the
+    entire cause.</p>
+    <p><b>What should happen next?</b></p>
+  `);
+
+  mapButtons(
+    ["PUNISH","TEACH","PATROL","ASK MORE","WAIT"],
+    [
+      ()=>finalDecision("punish"),
+      ()=>finalDecision("teach"),
+      ()=>finalDecision("patrol"),
+      ()=>moreInfo,
+      ()=>finalDecision("wait")
+    ]
+  );
+}
+
+function moreInfo(){
+  state.infoStep++;
+
+  render("MORE INFORMATION",`
+    <p>You speak with several villagers.</p>
+    <p>One important pattern appears:</p>
+    <div class="choice">
+      Theft is concentrated among people who recently arrived
+      and were never taught the village's rules.
+    </div>
+    <p>Older villagers also disagree about which rules apply.</p>
+    <hr>
+    <p>The problem isn't simply “bad people.”</p>
+    <p>There is a <b>knowledge and communication problem</b>.</p>
+    <p>Now you must decide what intervention fits.</p>
+  `);
+
+  save.profile.observation+=2;
+
+  mapButtons(
+    ["PUNISH","EDUCATE","PATROL","IGNORE","REFLECT"],
+    [
+      ()=>finalDecision("punish"),
+      ()=>finalDecision("teach"),
+      ()=>finalDecision("patrol"),
+      ()=>finalDecision("wait"),
+      reflection
+    ]
+  );
+}
+
+function finalDecision(type){
+  state.decision=type;
+
+  if(type==="teach"){
+    save.profile.adaptability+=2;
+    save.profile.consequence+=2;
+  }else if(type==="punish"){
+    save.profile.consequence+=1;
+  }else if(type==="patrol"){
+    save.profile.consequence+=1;
+  }else{
+    save.profile.restraint+=1;
+  }
+
+  render("YOUR DECISION",`
+    <p>You choose:</p>
+    <div class="choice highlight">
+      <b>${label(type)}</b>
+    </div>
+    <hr>
+    <p>The village will now respond according to your decision.</p>
+    <p><b>Press 5 to see what happens.</b></p>
+  `);
+
+  mapButtons(
+    ["CHANGE","CHANGE","CHANGE","REFLECT","REVEAL"],
+    [
+      ()=>investigate(),
+      ()=>investigate(),
+      ()=>investigate(),
+      reflection,
+      ()=>finalOutcome(type)
+    ]
+  );
+}
+
+function finalOutcome(type){
+  let titleText;
+  let body;
+
+  if(type==="teach"){
+    titleText="OUTCOME";
+    body=`
+      <p>The village begins teaching its rules to newcomers and
+      clarifying disputed customs for everyone.</p>
+      <p>Some theft stops because people now understand the boundaries
+      that previously caused confusion.</p>
+      <p>Not every problem disappears.</p>
+      <p>But the intervention addresses a cause rather than merely
+      reacting to the symptom.</p>
+      <hr>
+      <div class="good">
+        <b>IMPORTANT:</b><br>
+        You did not “win” because teaching is always better.
+        It fit this situation because the investigation revealed
+        a specific knowledge problem.
+      </div>
+    `;
+  }else if(type==="punish"){
+    body=`
+      <p>Punishment catches several offenders.</p>
+      <p>Some theft decreases.</p>
+      <p>However, people who never understood the rules remain confused,
+      and resentment grows.</p>
+      <p>Your intervention addressed behavior without fully addressing
+      the conditions producing it.</p>
+    `;
+  }else if(type==="patrol"){
+    body=`
+      <p>Patrols deter some theft.</p>
+      <p>The village becomes safer in certain locations.</p>
+      <p>But the underlying misunderstanding about rules remains.</p>
+      <p>The intervention works partially, but carries an ongoing cost.</p>
+    `;
+  }else{
+    body=`
+      <p>Some villagers eventually resolve the problem themselves.</p>
+      <p>Others do not.</p>
+      <p>Because you never clarified the situation, the outcome depends
+      heavily on circumstances outside your control.</p>
+      <p>Your restraint avoided unnecessary interference, but it also
+      meant that a preventable problem continued longer than necessary.</p>
+    `;
+  }
+
+  state.consequence=type;
+
+  render(titleText,`
+    ${body}
+    <hr>
+    <p><b>The important question is not whether you were “good” or “bad.”</b></p>
+    <p>What did your action actually change?</p>
+  `);
+
+  mapButtons(
+    ["ASSUMPTION","REFLECT","REPLAY","PROFILE","HOME"],
+    [assumption,reflection,startReplay,profile,title]
+  );
+}
+
+function assumption(){
+  let a="";
+
+  if(state.decision==="teach"){
+    a=`
+      <p>You initially might have assumed:</p>
+      <div class="choice">“The problem is caused by bad behavior.”</div>
+      <p>The investigation changed that model.</p>
+      <div class="choice highlight">
+        “Some of the behavior is produced by misunderstanding.”
+      </div>
+    `;
+  }else if(state.decision==="punish"||state.decision==="patrol"){
+    a=`
+      <p>Your first model focused on visible behavior.</p>
+      <div class="choice">Problem → offender → intervention</div>
+      <p>But the investigation revealed another possibility:</p>
+      <div class="choice highlight">
+        Problem → conditions → behavior
+      </div>
+    `;
+  }else{
+    a=`
+      <p>Your assumption was that intervention might create more harm
+      than the original problem.</p>
+      <p>That was partly true — but the absence of action also had
+      consequences.</p>
+    `;
+  }
+
+  render("ASSUMPTION CHECK",`
+    ${a}
+    <hr>
+    <p><b>Ask yourself:</b></p>
+    <p>Did I respond to reality, or to my first interpretation of reality?</p>
+  `);
+
+  mapButtons(
+    ["REFLECT","REPLAY","PROFILE","HOME",""],
+    [reflection,startReplay,profile,title,null]
+  );
+}
+
+function reflection(){
+  state.scene="REFLECTION";
+
+  render("REFLECTION",`
+    <p><b>There is no wisdom score.</b></p>
+    <p>Instead, examine your decision.</p>
+    <hr>
+    <p>1. What did you assume?</p>
+    <p>2. What information did you lack?</p>
+    <p>3. What did your intervention change?</p>
+    <p>4. What secondary effects appeared?</p>
+    <p>5. What would you notice sooner next time?</p>
+    <hr>
+    <p class="small">
+      A decision can be reasonable and still produce an unexpected
+      consequence. The consequence is information.
+    </p>
+  `);
+
+  mapButtons(
+    ["REPLAY","ASSUMPTION","PROFILE","HOME",""],
+    [startReplay,assumption,profile,title,null]
+  );
+}
+
+function startReplay(){
+  save.replays++;
+  saveGame();
+
+  state={
+    scene:"REPLAY",
+    choices:[],
+    selected:0,
+    assumptions:[],
+    decision:null,
+    consequence:null,
+    reflection:null,
+    infoStep:0
+  };
+
+  render("REPLAY",`
+    <p><b>Same village. More experience.</b></p>
+    <hr>
+    <p>You now know that acting quickly can create secondary problems.</p>
+    <p>You also know that waiting can allow a preventable problem to grow.</p>
+    <p>You have learned that investigation can change the meaning
+    of the situation.</p>
+    <hr>
+    <p><b>Try the case again.</b></p>
+    <p class="small">
+      Your previous decisions remain in your profile.
+    </p>
+  `);
+
+  mapButtons(
+    ["RETRY","PROFILE","HOME","ABOUT",""],
+    [observe,profile,title,about,null]
+  );
+}
+
+function label(x){
+  return {
+    teach:"TEACH THE RULES",
+    punish:"INCREASE PUNISHMENT",
+    patrol:"INCREASE PATROLS",
+    wait:"WAIT / OBSERVE"
+  }[x]||x.toUpperCase();
+}
+
+function profile(){
+  state.scene="PROFILE";
+
+  const p=save.profile;
+  const total=Math.max(
+    1,p.observation+p.restraint+p.adaptability+p.consequence
+  );
+
+  render("DECISION PROFILE",`
+    <p><b>RUNS:</b> ${save.runs}</p>
+    <p><b>DECISIONS:</b> ${save.decisions}</p>
+    <p><b>REPLAYS:</b> ${save.replays}</p>
+    <hr>
+
+    <p>OBSERVATION</p>
+    <div class="bar"><div class="fill" style="width:${pct(p.observation*8)}%"></div></div>
+
+    <p>RESTRAINT</p>
+    <div class="bar"><div class="fill" style="width:${pct(p.restraint*8)}%"></div></div>
+
+    <p>ADAPTABILITY</p>
+    <div class="bar"><div class="fill" style="width:${pct(p.adaptability*8)}%"></div></div>
+
+    <p>CONSEQUENCE AWARENESS</p>
+    <div class="bar"><div class="fill" style="width:${pct(p.consequence*8)}%"></div></div>
+
+    <hr>
+    <p class="small">
+      These are behavioral tendencies inside the game,
+      not measurements of your real-world wisdom.
+    </p>
+  `);
+
+  mapButtons(
+    ["CASE","REPLAY","ABOUT","RESET","HOME"],
+    [startCase,startReplay,about,resetGame,title]
+  );
+}
+
+function about(){
+  render("ABOUT SAGE",`
+    <p><b>SAFE GAME / SAGE GAME</b></p>
+    <hr>
+    <p>This cartridge is a decision-training experiment.</p>
+    <p>It draws inspiration from practical wisdom traditions,
+    including the story-based approach associated with the
+    <i>Lieh-tzu</i>.</p>
+    <p>The game does not claim that every situation has one
+    universally correct answer.</p>
+    <hr>
+    <p><b>CORE IDEA</b></p>
+    <p>
+      Don't force an answer before understanding the situation.
+    </p>
+    <p>
+      Action and non-action both have consequences.
+    </p>
+    <p>
+      The consequence gives you information.
+    </p>
+    <p>
+      Use that information to revise your model.
+    </p>
+  `);
+
+  mapButtons(
+    ["BEGIN","PROFILE","CASE","HOME",""],
+    [startCase,profile,startCase,title,null]
+  );
+}
+
+function resetGame(){
+  if(confirm("Erase SAGE GAME progress?")){
+    localStorage.removeItem(SAVE_KEY);
+    save=loadSave();
+    title();
+  }
+}
+
+keyControls();
+title();
+</script>
+
+</body>
+</html>
